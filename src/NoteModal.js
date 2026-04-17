@@ -2,25 +2,17 @@ import { useState } from "react";
 
 const SHEET_ID = "1rz1x8CFf613_HjOUsDfxZ2DJ1W5IObc8c05tiCXLSfs";
 
-async function saveToSheet({ itemName, phase, completedBy, vendor, cost, dateBooked, website, notes }) {
+async function saveToSheet(payload) {
   const timestamp = new Date().toLocaleString();
+  const details = Object.entries(payload.fields || {})
+    .filter(([, v]) => v !== "" && v !== undefined)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(" | ");
+
   const userMsg = `Append a row to Google Sheets spreadsheet ID: ${SHEET_ID}, sheet tab: Sheet1.
-
-If no header row exists yet, add this header first:
-Timestamp | Phase | Checklist Item | Completed By | Vendor / Contact | Cost | Date Booked/Completed | Website / Link | Notes
-
-Then append this row:
-- Timestamp: ${timestamp}
-- Phase: ${phase}
-- Checklist Item: ${itemName}
-- Completed By: ${completedBy || "Unknown"}
-- Vendor / Contact: ${vendor || ""}
-- Cost: ${cost || ""}
-- Date Booked/Completed: ${dateBooked || ""}
-- Website / Link: ${website || ""}
-- Notes: ${notes || ""}
-
-Use the Google Sheets tools available to you to write this data now.`;
+If no header row exists, add: Timestamp | Phase | Checklist Item | Completed By | Details
+Then append: ["${timestamp}", "${payload.phase}", "${payload.itemLabel}", "${payload.completedBy}", "${details}"]
+Use your Google Sheets tools now.`;
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -33,29 +25,157 @@ Use the Google Sheets tools available to you to write this data now.`;
     }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  const allText = (data.content || []).map(b => b.text || "").join(" ").toLowerCase();
-  if (allText.includes("unable to") || allText.includes("failed")) throw new Error("Sheet write failed");
-  return true;
 }
 
+// ── Shared styles ──────────────────────────────────────────────────────────────
+const inp = (extra = {}) => ({
+  width: "100%", padding: "10px 12px", border: "1px solid #ded8cf",
+  borderRadius: 8, fontSize: 14, fontFamily: "Georgia, serif",
+  color: "#2c2416", background: "#fdfaf7", boxSizing: "border-box", outline: "none",
+  ...extra,
+});
+const lbl = { fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: "#9a8a7a", marginBottom: 5, display: "block", fontFamily: "Georgia, serif" };
+
+// ── Sub-form renderers ─────────────────────────────────────────────────────────
+
+function VendorForm({ data, onChange }) {
+  const field = (key, label, placeholder, type = "text") => (
+    <div key={key}>
+      <label style={lbl}>{label}</label>
+      {type === "textarea"
+        ? <textarea style={inp({ resize: "vertical", minHeight: 72 })} placeholder={placeholder} value={data[key] || ""} onChange={e => onChange(key, e.target.value)} />
+        : <input style={inp()} type={type} placeholder={placeholder} value={data[key] || ""} onChange={e => onChange(key, e.target.value)} />
+      }
+    </div>
+  );
+  return (
+    <>
+      {field("name", "Name (optional)", "e.g. Jane Smith")}
+      {field("email", "Email (optional)", "e.g. jane@email.com", "email")}
+      {field("phone", "Phone number (optional)", "e.g. (612) 555-0100", "tel")}
+      {field("cost", "Cost / Price Paid (optional)", "e.g. $2,500")}
+      {field("notes", "Notes (optional)", "Contract #, reminders…", "textarea")}
+    </>
+  );
+}
+
+function BudgetForm({ data, onChange }) {
+  return (
+    <>
+      <div>
+        <label style={lbl}>Minimum Budget</label>
+        <input style={inp()} type="text" placeholder="e.g. $20,000" value={data.min || ""} onChange={e => onChange("min", e.target.value)} />
+      </div>
+      <div>
+        <label style={lbl}>Maximum Budget</label>
+        <input style={inp()} type="text" placeholder="e.g. $35,000" value={data.max || ""} onChange={e => onChange("max", e.target.value)} />
+      </div>
+    </>
+  );
+}
+
+function CustomForm({ fields, data, onChange }) {
+  return (
+    <>
+      {fields.map(f => (
+        <div key={f.key}>
+          <label style={lbl}>{f.label}{f.required ? " *" : ""}</label>
+          {f.type === "textarea"
+            ? <textarea style={inp({ resize: "vertical", minHeight: 72 })} placeholder={f.placeholder} value={data[f.key] || ""} onChange={e => onChange(f.key, e.target.value)} required={f.required} />
+            : <input style={inp()} type={f.type || "text"} placeholder={f.placeholder} value={data[f.key] || ""} onChange={e => onChange(f.key, e.target.value)} required={f.required} />
+          }
+        </div>
+      ))}
+    </>
+  );
+}
+
+function DelegatesForm({ data, onChange }) {
+  const rows = data.rows || [{ name: "", assignment: "" }];
+  const update = (i, key, val) => {
+    const next = rows.map((r, ri) => ri === i ? { ...r, [key]: val } : r);
+    onChange("rows", next);
+  };
+  const addRow = () => onChange("rows", [...rows, { name: "", assignment: "" }]);
+  const removeRow = i => onChange("rows", rows.filter((_, ri) => ri !== i));
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 28px", gap: 6, marginBottom: 6 }}>
+        <span style={{ ...lbl, marginBottom: 0 }}>Name</span>
+        <span style={{ ...lbl, marginBottom: 0 }}>Assignment</span>
+        <span />
+      </div>
+      {rows.map((row, i) => (
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 28px", gap: 6, marginBottom: 6 }}>
+          <input style={inp()} placeholder="Name" value={row.name} onChange={e => update(i, "name", e.target.value)} />
+          <input style={inp()} placeholder="Task or role" value={row.assignment} onChange={e => update(i, "assignment", e.target.value)} />
+          <button onClick={() => removeRow(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: 16, padding: 0 }} title="Remove">✕</button>
+        </div>
+      ))}
+      <button onClick={addRow} style={{ marginTop: 4, padding: "7px 14px", borderRadius: 7, border: "1px dashed #c9a96e", background: "transparent", color: "#c9a96e", fontSize: 13, cursor: "pointer", fontFamily: "Georgia, serif" }}>
+        + Add Delegate
+      </button>
+    </div>
+  );
+}
+
+function VendorsTableForm({ data, onChange }) {
+  const rows = data.rows || [{ name: "", phone: "", email: "", type: "" }];
+  const update = (i, key, val) => {
+    const next = rows.map((r, ri) => ri === i ? { ...r, [key]: val } : r);
+    onChange("rows", next);
+  };
+  const addRow = () => onChange("rows", [...rows, { name: "", phone: "", email: "", type: "" }]);
+  const removeRow = i => onChange("rows", rows.filter((_, ri) => ri !== i));
+
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 28px", gap: 6, marginBottom: 6, minWidth: 480 }}>
+        {["Name", "Phone #", "Email", "Vendor Type", ""].map(h => <span key={h} style={{ ...lbl, marginBottom: 0 }}>{h}</span>)}
+      </div>
+      {rows.map((row, i) => (
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 28px", gap: 6, marginBottom: 6, minWidth: 480 }}>
+          <input style={inp()} placeholder="Name" value={row.name} onChange={e => update(i, "name", e.target.value)} />
+          <input style={inp()} placeholder="Phone" type="tel" value={row.phone} onChange={e => update(i, "phone", e.target.value)} />
+          <input style={inp()} placeholder="Email" type="email" value={row.email} onChange={e => update(i, "email", e.target.value)} />
+          <input style={inp()} placeholder="e.g. Florist" value={row.type} onChange={e => update(i, "type", e.target.value)} />
+          <button onClick={() => removeRow(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: 16, padding: 0 }} title="Remove">✕</button>
+        </div>
+      ))}
+      <button onClick={addRow} style={{ marginTop: 4, padding: "7px 14px", borderRadius: 7, border: "1px dashed #9bb5d6", background: "transparent", color: "#9bb5d6", fontSize: 13, cursor: "pointer", fontFamily: "Georgia, serif" }}>
+        + Add Vendor
+      </button>
+    </div>
+  );
+}
+
+// ── Main Modal ─────────────────────────────────────────────────────────────────
 export default function NoteModal({ item, phase, color, existingData, completedBy, onClose, onSaved }) {
-  const [vendor, setVendor] = useState(existingData?.vendor || "");
-  const [cost, setCost] = useState(existingData?.cost || "");
-  const [dateBooked, setDateBooked] = useState(existingData?.dateBooked || "");
-  const [website, setWebsite] = useState(existingData?.website || "");
-  const [notes, setNotes] = useState(existingData?.notes || "");
+  const [data, setData] = useState(existingData || {});
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
 
+  const update = (key, val) => setData(prev => ({ ...prev, [key]: val }));
+
+  // Validate required fields
+  const validate = () => {
+    if (item.modal === "custom" && item.fields) {
+      for (const f of item.fields) {
+        if (f.required && !data[f.key]) return false;
+      }
+    }
+    return true;
+  };
+
   const handleSave = async () => {
-    setSaving(true);
-    setStatus(null);
+    if (!validate()) { setErrorMsg("Please fill in all required fields."); return; }
+    setSaving(true); setStatus(null); setErrorMsg("");
     try {
-      await saveToSheet({ itemName: item, phase, completedBy, vendor, cost, dateBooked, website, notes });
+      await saveToSheet({ itemLabel: item.label, phase, completedBy, fields: data });
       setStatus("success");
-      setTimeout(() => onSaved({ vendor, cost, dateBooked, website, notes }), 900);
+      setTimeout(() => onSaved(data), 800);
     } catch (e) {
       setErrorMsg(e.message || "Could not save to Google Sheets.");
       setStatus("error");
@@ -63,36 +183,32 @@ export default function NoteModal({ item, phase, color, existingData, completedB
     }
   };
 
-  const inp = {
-    width: "100%", padding: "10px 12px", border: "1px solid #ded8cf",
-    borderRadius: 8, fontSize: 14, fontFamily: "Georgia, serif",
-    color: "#2c2416", background: "#fdfaf7", boxSizing: "border-box", outline: "none",
-  };
-  const lbl = {
-    fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase",
-    color: "#9a8a7a", marginBottom: 5, display: "block", fontFamily: "Georgia, serif",
+  const renderForm = () => {
+    switch (item.modal) {
+      case "vendor":       return <VendorForm data={data} onChange={update} />;
+      case "budget":       return <BudgetForm data={data} onChange={update} />;
+      case "custom":       return <CustomForm fields={item.fields} data={data} onChange={update} />;
+      case "delegates":    return <DelegatesForm data={data} onChange={update} />;
+      case "vendors_table":return <VendorsTableForm data={data} onChange={update} />;
+      default:             return null;
+    }
   };
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(44,36,22,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "#faf8f5", borderRadius: 16, width: "100%", maxWidth: 500, boxShadow: "0 24px 64px rgba(44,36,22,0.35)", overflow: "hidden", maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#faf8f5", borderRadius: 16, width: "100%", maxWidth: 560, boxShadow: "0 24px 64px rgba(44,36,22,0.35)", overflow: "hidden", maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
 
         {/* Header */}
         <div style={{ background: "linear-gradient(135deg, #2c2416, #4a3728)", padding: "20px 24px", borderBottom: `3px solid ${color}` }}>
-          <div style={{ fontSize: 11, letterSpacing: "0.2em", color, textTransform: "uppercase", marginBottom: 6 }}>Log Details → Google Sheets</div>
-          <div style={{ color: "#fdf6ec", fontSize: 15, lineHeight: 1.4 }}>{item}</div>
+          <div style={{ fontSize: 11, letterSpacing: "0.2em", color, textTransform: "uppercase", marginBottom: 6 }}>Add Details → Google Sheets</div>
+          <div style={{ color: "#fdf6ec", fontSize: 15, lineHeight: 1.4 }}>{item.label}</div>
           <div style={{ color: "#9a8a6a", fontSize: 12, marginTop: 3, fontStyle: "italic" }}>{phase} · logged by {completedBy}</div>
         </div>
 
-        {/* Form */}
+        {/* Form body */}
         <div style={{ overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
-          <div><label style={lbl}>Vendor / Contact Name</label><input style={inp} placeholder="e.g. Jane Smith Photography" value={vendor} onChange={e => setVendor(e.target.value)} /></div>
-          <div><label style={lbl}>Cost / Price Paid</label><input style={inp} placeholder="e.g. $2,500 deposit" value={cost} onChange={e => setCost(e.target.value)} /></div>
-          <div><label style={lbl}>Date Booked or Completed</label><input style={inp} type="date" value={dateBooked} onChange={e => setDateBooked(e.target.value)} /></div>
-          <div><label style={lbl}>Website or Link</label><input style={inp} placeholder="e.g. https://vendor.com" value={website} onChange={e => setWebsite(e.target.value)} /></div>
-          <div><label style={lbl}>Notes</label><textarea style={{ ...inp, resize: "vertical", minHeight: 80 }} placeholder="Contract #, reminders, details…" value={notes} onChange={e => setNotes(e.target.value)} /></div>
-
-          {status === "error" && <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#b91c1c" }}>⚠ {errorMsg}</div>}
+          {renderForm()}
+          {errorMsg && <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#b91c1c" }}>⚠ {errorMsg}</div>}
           {status === "success" && <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#15803d", textAlign: "center" }}>✓ Saved to Google Sheets!</div>}
         </div>
 

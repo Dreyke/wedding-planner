@@ -3,6 +3,7 @@ import { ref, onValue, set } from "firebase/database";
 import { db } from "./firebase";
 import { sections } from "./sections";
 import NoteModal from "./NoteModal";
+import { saveToSheet } from "./saveToSheet";
 
 const USER_KEY = "wedding_planner_user";
 const ROLES = ["Bride", "Groom", "Mother of Bride", "Father of Bride", "Maid of Honor", "Best Man", "Wedding Planner"];
@@ -147,6 +148,14 @@ export default function App() {
       });
       if (item.modal) {
         setModal({ key, item, phase: section.label, color: section.color });
+      } else {
+        // No modal — save a simple completion row to Sheets immediately
+        saveToSheet({
+          itemLabel: item.label,
+          phase: section.label,
+          completedBy: currentUser.name,
+          fields: {},
+        }).catch(err => console.error("Sheets save failed:", err));
       }
     }
   };

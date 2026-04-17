@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ref, onValue, set, get } from "firebase/database";
+import { ref, onValue, set } from "firebase/database";
 import { db } from "./firebase";
 import { sections } from "./sections";
 import NoteModal from "./NoteModal";

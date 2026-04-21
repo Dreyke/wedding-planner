@@ -6,7 +6,7 @@ import NoteModal from "./NoteModal";
 import { saveToSheet } from "./saveToSheet";
 
 const USER_KEY = "wedding_planner_user";
-const ROLES = ["Bride", "Groom", "Mother of Bride", "Father of Bride", "Sister of the Bride", "Brother of the Bride", "Sister of the Groom", "Brother of the Groom", "Maid of Honor", "Best Man", "Wedding Planner"];
+const ROLES = ["Bride", "Groom", "Mother of Bride", "Father of Bride", "Sister of the Bride", "Brother of the Bride", "Sister of the Groom", "Brother of the Groom", "Maid of Honor", "Best Man", "Wedding Planner", "Other"];
 const AVATAR_COLORS = ["#c9a96e", "#a8c5a0", "#9bb5d6", "#c9a0c5", "#d6a88e", "#e8a0a0", "#a0c5c5", "#b0a0d6"];
 
 function getAvatarColor(name) {
